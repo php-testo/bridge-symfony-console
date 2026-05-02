@@ -1,0 +1,43 @@
+{
+    "name": "testo/bridge-symfony-console",
+    "description": "Symfony Console bridge for the Testo testing framework.",
+    "license": "BSD-3-Clause",
+    "type": "library",
+    "keywords": [
+        "testo",
+        "symfony",
+        "console"
+    ],
+    "authors": [
+        {
+            "name": "Aleksei Gagarin (roxblnfk)",
+            "homepage": "https://github.com/roxblnfk"
+        }
+    ],
+    "funding": [
+        {
+            "type": "boosty",
+            "url": "https://boosty.to/roxblnfk"
+        }
+    ],
+    "require": {
+        "php": ">=8.2",
+        "symfony/console": "^6.4 || ^7 || ^8.0",
+        "testo/testo": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Testo\\Bridge\\Symfony\\Console\\": "src/"
+        }
+    },
+    "bin": [
+        "bin/testo"
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "extra": {
+        "branch-alias": {
+            "dev-1.x": "1.x-dev"
+        }
+    }
+}
