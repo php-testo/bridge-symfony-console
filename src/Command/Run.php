@@ -9,6 +9,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Testo\Output\Json\JsonPlugin;
 use Testo\Output\Teamcity\TeamcityPlugin;
 use Testo\Output\Terminal\TerminalPlugin;
 
@@ -21,8 +22,9 @@ use Testo\Output\Terminal\TerminalPlugin;
  *
  * Filter Logic:
  * - Multiple values of same filter type use OR logic (e.g., --filter=test1 --filter=test2)
- * - Different filter types use AND logic (e.g., --filter + --path + --suite)
- * - Final result: AND(OR(filters), OR(paths), OR(suites))
+ * - Different filter types use AND logic (e.g., --filter + --path + --suite + --group)
+ * - Groups split into include (OR) and exclude (OR, marked with a leading "!"); exclusion wins
+ * - Final result: AND(OR(filters), OR(paths), OR(suites), OR(includeGroups), NOT OR(excludeGroups))
  *
  * ```bash
  *  # Run all tests in default location
@@ -43,6 +45,15 @@ use Testo\Output\Terminal\TerminalPlugin;
  *
  *  # Filter by test suite name (OR logic)
  *  ./bin/testo run --suite=Unit --suite=Integration
+ *
+ *  # Run only tests in the given groups (OR logic)
+ *  ./bin/testo run --group=db --group=integration
+ *
+ *  # Exclude a group with the "!" prefix (runs everything except the "slow" group)
+ *  ./bin/testo run --group=!slow
+ *
+ *  # Combine groups with name filters (AND between types)
+ *  ./bin/testo run --group=db --filter=UserTest
  *
  *  # Combine filters with AND logic between types
  *  # Runs tests that match (UserTest::testCreate OR UserTest::testUpdate) AND (Critical suite)
@@ -69,6 +80,20 @@ final class Run extends Base
         parent::configure();
         $this->addOption('teamcity', null, InputOption::VALUE_NONE);
         $this->addOption(
+            'json',
+            null,
+            InputOption::VALUE_NONE,
+            'Render the run as a single minimalistic JSON object on stdout '
+            . '(run summary + failed tests). Intended for LLM agents and CI scripts.',
+        );
+        $this->addOption(
+            'log-json',
+            null,
+            InputOption::VALUE_REQUIRED,
+            'Write the minimalistic JSON report (run summary + failed tests) to the given path. '
+            . 'Unlike --json this keeps the human-readable terminal output; mirrors --log-junit.',
+        );
+        $this->addOption(
             'filter',
             null,
             InputOption::VALUE_OPTIONAL | InputOption::VALUE_IS_ARRAY,
@@ -91,6 +116,13 @@ final class Run extends Base
             null,
             InputOption::VALUE_OPTIONAL,
             'Filter test cases by type (e.g. test, test-inline, bench)',
+        );
+        $this->addOption(
+            'group',
+            null,
+            InputOption::VALUE_OPTIONAL | InputOption::VALUE_IS_ARRAY,
+            'Run only tests in these groups (OR logic). '
+            . 'Prefix a name with "!" to exclude it instead, e.g. --group=db --group=!slow.',
         );
         $this->addOption(
             'coverage',
@@ -138,9 +170,25 @@ final class Run extends Base
         InputInterface  $input,
         OutputInterface $output,
     ): int {
-        $input->getOption('teamcity')
-            ? $this->container->get(TeamcityPlugin::class)->configure($this->container)
-            : $this->container->get(TerminalPlugin::class)->configure($this->container);
+        // Exactly one renderer owns stdout — reject conflicting flags instead of silently picking one.
+        $teamcity = (bool) $input->getOption('teamcity');
+        $json = (bool) $input->getOption('json');
+        $teamcity && $json and throw new \InvalidArgumentException(
+            'Options --teamcity and --json are mutually exclusive: both render to stdout. Pick one, '
+            . 'or use --log-json=<path> to write JSON to a file alongside another renderer.',
+        );
+
+        $renderer = match (true) {
+            $teamcity => TeamcityPlugin::class,
+            $json => JsonPlugin::class,
+            default => TerminalPlugin::class,
+        };
+        $this->container->get($renderer)->configure($this->container);
+
+        // --log-json writes the JSON report to a file alongside the stdout renderer above.
+        $logJson = $input->getOption('log-json');
+        \is_string($logJson) && $logJson !== ''
+            and (new JsonPlugin($logJson))->configure($this->container);
 
         $result = $this->application->run();
 
